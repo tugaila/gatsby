@@ -20,6 +20,7 @@ import { getAbsolutePathForVirtualModule } from "./gatsby-webpack-virtual-module
 import { StaticQueryMapper } from "./webpack/static-query-mapper"
 import { TmpMiniCssExtractContentHashOverWrite } from "./webpack/tmp-mini-css-extract-contenthash-overwrite"
 import { getBrowsersList } from "./browserslist"
+import { builtinModules } from "module"
 
 const FRAMEWORK_BUNDLES = [`react`, `react-dom`, `scheduler`, `prop-types`]
 
@@ -640,8 +641,32 @@ module.exports = async (
     // removes node internals from bundle
     // https://webpack.js.org/configuration/externals/#externalspresets
     config.externalsPresets = {
-      node: true,
+      node: false,
     }
+
+    const builtinModulesToTrack = [
+      `fs`,
+      `http`,
+      `http2`,
+      `https`,
+      `child_process`,
+    ]
+    const builtinsExternalsDictionary = builtinModules.reduce(
+      (acc, builtinModule) => {
+        if (builtinModulesToTrack.includes(builtinModule)) {
+          acc[builtinModule] = `commonjs ${path.join(
+            process.cwd(),
+            `.cache`,
+            `ssr-builtin-trackers`,
+            builtinModule
+          )}`
+        } else {
+          acc[builtinModule] = `commonjs ${builtinModule}`
+        }
+        return acc
+      },
+      {}
+    )
 
     // Packages we want to externalize to save some build time
     // https://github.com/gatsbyjs/gatsby/pull/14208#pullrequestreview-240178728
@@ -661,6 +686,7 @@ module.exports = async (
     }
 
     config.externals = [
+      builtinsExternalsDictionary,
       function ({ context, getResolve, request }, callback) {
         // allows us to resolve webpack aliases from our config
         // helpful for when react is aliased to preact-compat

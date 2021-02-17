@@ -4,7 +4,7 @@ import * as path from "path"
 
 import { getPageHtmlFilePath } from "../../utils/page-html"
 import { IPageDataWithQueryResult } from "../../utils/page-data"
-
+import { IRenderHtmlResult } from "../../commands/build-html"
 // we want to force posix-style joins, so Windows doesn't produce backslashes for urls
 const { join } = path.posix
 
@@ -291,7 +291,7 @@ export const renderHTMLProd = async ({
   paths: Array<string>
   envVars: Array<Array<string>>
   sessionId: number
-}): Promise<Array<unknown>> => {
+}): Promise<IRenderHtmlResult> => {
   const publicDir = join(process.cwd(), `public`)
 
   // Check if we need to do setup and cache clearing. Within same session we can reuse memoized data,
@@ -310,26 +310,38 @@ export const renderHTMLProd = async ({
     lastSessionId = sessionId
   }
 
-  return Bluebird.map(paths, async pagePath => {
+  const unsafeBuiltinsUsageByPagePath = {}
+
+  await Bluebird.map(paths, async pagePath => {
     try {
       const pageData = await readPageData(publicDir, pagePath)
       const resourcesForTemplate = await getResourcesForTemplate(pageData)
 
-      const htmlString = htmlComponentRenderer.default({
+      const { html, unsafeBuiltinsUsage } = htmlComponentRenderer.default({
         pagePath,
         pageData,
         ...resourcesForTemplate,
       })
 
-      return fs.outputFile(getPageHtmlFilePath(publicDir, pagePath), htmlString)
+      if (unsafeBuiltinsUsage.length > 0) {
+        unsafeBuiltinsUsageByPagePath[pagePath] = unsafeBuiltinsUsage
+      }
+
+      return fs.outputFile(getPageHtmlFilePath(publicDir, pagePath), html)
     } catch (e) {
+      if (e.unsafeBuiltinsUsage && e.unsafeBuiltinsUsage.length > 0) {
+        unsafeBuiltinsUsageByPagePath[pagePath] = e.unsafeBuiltinsUsage
+      }
       // add some context to error so we can display more helpful message
       e.context = {
         path: pagePath,
+        unsafeBuiltinsUsageByPagePath,
       }
       throw e
     }
   })
+
+  return { unsafeBuiltinsUsageByPagePath }
 }
 
 // TODO: remove when DEV_SSR is done
